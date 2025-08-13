@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).parent.resolve()
 SESSIONS_DIR = BASE_DIR / "sessions"
 SESSIONS_DIR.mkdir(exist_ok=True)
 
-ADMIN_IDS = [7818451398]  # <-- Ganti dengan Telegram user_id kamu (int)
+ADMIN_IDS = [123456789]  # <-- Ganti dengan Telegram user_id kamu (int)
 
 # ========= Helpers =========
 
