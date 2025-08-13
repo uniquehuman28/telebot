@@ -285,21 +285,61 @@ async def process_inputs(msg: Message, state: FSMContext):
                 contact_counter += 1
             write_vcard_batch(target_path, pairs)
 
-        # Kirim hasil
-        vcf_files = sorted(out_dir.glob("*.vcf"))
+        # FIXED: Sort files by number, not alphabetically
+        vcf_files = list(out_dir.glob("*.vcf"))
+        # Extract number from filename and sort numerically
+        def extract_number(filepath):
+            filename = filepath.stem
+            # Extract last number from filename (e.g., "Kontak 1" -> 1, "Kontak 10" -> 10)
+            match = re.search(r'(\d+)
+
+        # Baru hapus cache setelah semua file terkirim
+        clear_session(msg.from_user.id)
+        await state.clear()
+
+    except Exception as e:
+        await status.edit_text(f"❌ Terjadi error: {e}")
+    finally:
+        pass  # Cache dibersihkan setelah file terkirim
+
+# ========= Entry Point =========
+
+async def main():
+    if not BOT_TOKEN:
+        raise RuntimeError("Set BOT_TOKEN environment variable.")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main()), filename)
+            return int(match.group(1)) if match else 0
+        
+        vcf_files_sorted = sorted(vcf_files, key=extract_number)
+        
         summary = (
             f"✅ Selesai!\n"
             f"• Total kontak valid: {total_contacts}\n"
             f"• Baris di-skip (invalid): {invalid_count}\n"
-            f"• File VCF: {len(vcf_files)}"
+            f"• File VCF: {len(vcf_files_sorted)}"
         )
         await status.edit_text(summary)
         
-        # FIXED: Kirim file tanpa caption
-        from aiogram.types import FSInputFile
-        for fp in vcf_files:
-            file_input = FSInputFile(fp)
-            await msg.answer_document(document=file_input)  # Hapus caption=fp.name
+        # FIXED: Kirim semua file sekaligus dengan urutan yang benar
+        from aiogram.types import FSInputFile, InputMediaDocument
+        
+        if len(vcf_files_sorted) == 1:
+            # Single file
+            file_input = FSInputFile(vcf_files_sorted[0])
+            await msg.answer_document(document=file_input)
+        else:
+            # Multiple files - send as media group (max 10 files per group)
+            media_groups = []
+            for i in range(0, len(vcf_files_sorted), 10):
+                batch = vcf_files_sorted[i:i+10]
+                media = [InputMediaDocument(media=FSInputFile(fp)) for fp in batch]
+                media_groups.append(media)
+            
+            for media_group in media_groups:
+                await msg.answer_media_group(media=media_group)
 
         # Baru hapus cache setelah semua file terkirim
         clear_session(msg.from_user.id)
