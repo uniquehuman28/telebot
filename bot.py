@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, InputMediaDocument
 from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).parent.resolve()
 SESSIONS_DIR = BASE_DIR / "sessions"
 SESSIONS_DIR.mkdir(exist_ok=True)
 
-# ========= Helpers (adapted from your script) =========
+# ========= Helpers =========
 
 def format_number(raw: str, default_cc="+62", min_len=8, max_len=15):
     raw = (raw or "").strip()
@@ -80,7 +80,6 @@ def write_vcard_batch(vcf_path: Path, contact_fullname_number_pairs: List[Tuple[
             vcf.write("BEGIN:VCARD\r\n")
             vcf.write("VERSION:3.0\r\n")
             vcf.write(f"FN:{fullname}\r\n")
-            # Put given name in second slot for better sorting in many clients
             parts = fullname.split(" ", 1)
             family = parts[1] if len(parts) > 1 else ""
             given = parts[0]
@@ -177,7 +176,6 @@ async def handle_document(msg: Message, state: FSMContext):
         return
     in_dir, _ = session_paths(msg.from_user.id)
     dest = in_dir / doc.file_name
-    # Unduh file
     file = await bot.get_file(doc.file_id)
     await bot.download_file(file.file_path, destination=dest)
     count = len(list(in_dir.glob("*.txt")))
@@ -251,7 +249,6 @@ async def process_inputs(msg: Message, state: FSMContext):
             await state.clear()
             return
 
-        # Tulis VCF
         processed = 0
         pad = len(str(total_contacts))
         for batch, target_path in plan:
@@ -262,7 +259,6 @@ async def process_inputs(msg: Message, state: FSMContext):
                 pairs.append((fullname, num))
             write_vcard_batch(target_path, pairs)
 
-        # Kirim hasil
         vcf_files = sorted(out_dir.glob("*.vcf"))
         summary = (
             f"✅ Selesai!\n"
@@ -271,8 +267,15 @@ async def process_inputs(msg: Message, state: FSMContext):
             f"• File VCF: {len(vcf_files)}"
         )
         await status.edit_text(summary)
-        for fp in vcf_files:
-            await msg.answer_document(document=fp.open("rb"), caption=fp.name)
+
+        # Kirim semua file secara bersamaan (maks 10 per batch)
+        batch_size = 10
+        for i in range(0, len(vcf_files), batch_size):
+            media = [
+                InputMediaDocument(media=InputFile(fp), caption=fp.name)
+                for fp in vcf_files[i:i+batch_size]
+            ]
+            await msg.answer_media_group(media)
 
     except Exception as e:
         await status.edit_text(f"❌ Terjadi error: {e}")
