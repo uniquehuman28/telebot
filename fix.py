@@ -222,7 +222,7 @@ async def ask_outbase(msg: Message, state: FSMContext):
         return
     await state.update_data(contact_name=contact)
     await state.set_state(UploadStates.ask_outbase)
-    await msg.reply("Masukkan Nama File Output Dasar (mis. Kontak, Teman, dsb):")
+    await msg.reply("Masukkan Nama File Output Dasar (CONTOH : HKSIANG):")
 
 @dp.message(UploadStates.ask_outbase)
 async def ask_perfile(msg: Message, state: FSMContext):
@@ -232,7 +232,7 @@ async def ask_perfile(msg: Message, state: FSMContext):
         return
     await state.update_data(base_file=outbase)
     await state.set_state(UploadStates.ask_perfile)
-    await msg.reply("Berapa kontak maksimal per file .vcf? (angka, mis. 500)")
+    await msg.reply("Berapa kontak maksimal per file .vcf? (angka, Contoh : 50)")
 
 @dp.message(UploadStates.ask_perfile)
 async def process_inputs(msg: Message, state: FSMContext):
@@ -250,7 +250,7 @@ async def process_inputs(msg: Message, state: FSMContext):
 
     in_dir, out_dir = session_paths(msg.from_user.id)
     await state.set_state(UploadStates.processing)
-    status = await msg.reply("⏳ Memproses...")
+    status = await msg.reply("⏳ Memproses... Donasi ke QRIS di pp bot ini untuk proses yang lebih cepat😅")
 
     try:
         plan, total_contacts, conflicts, invalid_count = plan_outputs(
