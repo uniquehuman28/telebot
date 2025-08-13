@@ -7,21 +7,19 @@ from pathlib import Path
 from typing import List, Tuple
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram.types import Message, FSInputFile, InputMediaDocument
 from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# ========= Config =========
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # set via env var di hosting/VPS
+# Config
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 BASE_DIR = Path(__file__).parent.resolve()
 SESSIONS_DIR = BASE_DIR / "sessions"
 SESSIONS_DIR.mkdir(exist_ok=True)
 
-ADMIN_IDS = [123456789]  # <-- Ganti dengan Telegram user_id kamu (int)
-
-# ========= Helpers =========
+ADMIN_IDS = [7818451398]
 
 def format_number(raw: str, default_cc="+62", min_len=8, max_len=15):
     raw = (raw or "").strip()
@@ -93,7 +91,6 @@ def write_vcard_batch(vcf_path: Path, contact_fullname_number_pairs: List[Tuple[
 def plan_outputs(src_folder: Path, base_file_name: str, per_file: int, output_dir: Path):
     plan = []
     conflicts = set()
-    total_contacts = 0
     batch_idx_global = 0
 
     txt_files = list_txt_files(src_folder)
@@ -126,7 +123,6 @@ def plan_outputs(src_folder: Path, base_file_name: str, per_file: int, output_di
 
     return plan, total_contacts, conflicts, invalid_count
 
-# ========= FSM States =========
 class UploadStates(StatesGroup):
     collecting = State()
     ask_contact = State()
@@ -134,7 +130,6 @@ class UploadStates(StatesGroup):
     ask_perfile = State()
     processing = State()
 
-# ========= Bot setup =========
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -149,8 +144,6 @@ def clear_session(user_id: int):
     user_dir = SESSIONS_DIR / str(user_id)
     if user_dir.exists():
         shutil.rmtree(user_dir, ignore_errors=True)
-
-# ========= Commands & Handlers =========
 
 @dp.message(Command("start"))
 async def start_cmd(msg: Message, state: FSMContext):
@@ -173,11 +166,9 @@ async def handle_document(msg: Message, state: FSMContext):
     in_dir, _ = session_paths(msg.from_user.id)
     dest = in_dir / doc.file_name
 
-    # Unduh ke server
     file = await bot.get_file(doc.file_id)
     await bot.download_file(file.file_path, destination=dest)
 
-    # Simpan daftar file ke state
     data = await state.get_data()
     uploaded = data.get("uploaded_files", [])
     uploaded.append(doc.file_name)
@@ -275,45 +266,26 @@ async def process_inputs(msg: Message, state: FSMContext):
             await state.clear()
             return
 
-        # FIXED: Tulis VCF dengan urutan angka berurutan
-        contact_counter = 1  # Start dari 1
+        contact_counter = 1
         for batch, target_path in plan:
             pairs = []
             for num in batch:
-                fullname = f"{contact_name} {contact_counter}"  # Simple urutan 1,2,3,4,5...
+                fullname = f"{contact_name} {contact_counter}"
                 pairs.append((fullname, num))
                 contact_counter += 1
             write_vcard_batch(target_path, pairs)
 
-        # FIXED: Sort files by number, not alphabetically
         vcf_files = list(out_dir.glob("*.vcf"))
-        # Extract number from filename and sort numerically
-        def extract_number(filepath):
-            filename = filepath.stem
-            # Extract last number from filename (e.g., "Kontak 1" -> 1, "Kontak 10" -> 10)
-            match = re.search(r'(\d+)
-
-        # Baru hapus cache setelah semua file terkirim
-        clear_session(msg.from_user.id)
-        await state.clear()
-
-    except Exception as e:
-        await status.edit_text(f"❌ Terjadi error: {e}")
-    finally:
-        pass  # Cache dibersihkan setelah file terkirim
-
-# ========= Entry Point =========
-
-async def main():
-    if not BOT_TOKEN:
-        raise RuntimeError("Set BOT_TOKEN environment variable.")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main()), filename)
-            return int(match.group(1)) if match else 0
         
-        vcf_files_sorted = sorted(vcf_files, key=extract_number)
+        def get_file_number(filepath):
+            name = filepath.stem
+            parts = name.split()
+            try:
+                return int(parts[-1])
+            except:
+                return 0
+                
+        vcf_files_sorted = sorted(vcf_files, key=get_file_number)
         
         summary = (
             f"✅ Selesai!\n"
@@ -323,34 +295,22 @@ if __name__ == "__main__":
         )
         await status.edit_text(summary)
         
-        # FIXED: Kirim semua file sekaligus dengan urutan yang benar
-        from aiogram.types import FSInputFile, InputMediaDocument
-        
         if len(vcf_files_sorted) == 1:
-            # Single file
             file_input = FSInputFile(vcf_files_sorted[0])
             await msg.answer_document(document=file_input)
         else:
-            # Multiple files - send as media group (max 10 files per group)
-            media_groups = []
             for i in range(0, len(vcf_files_sorted), 10):
                 batch = vcf_files_sorted[i:i+10]
-                media = [InputMediaDocument(media=FSInputFile(fp)) for fp in batch]
-                media_groups.append(media)
-            
-            for media_group in media_groups:
-                await msg.answer_media_group(media=media_group)
+                media = []
+                for fp in batch:
+                    media.append(InputMediaDocument(media=FSInputFile(fp)))
+                await msg.answer_media_group(media=media)
 
-        # Baru hapus cache setelah semua file terkirim
         clear_session(msg.from_user.id)
         await state.clear()
 
     except Exception as e:
         await status.edit_text(f"❌ Terjadi error: {e}")
-    finally:
-        pass  # Cache dibersihkan setelah file terkirim
-
-# ========= Entry Point =========
 
 async def main():
     if not BOT_TOKEN:
