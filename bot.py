@@ -1,14 +1,13 @@
 import os
 import re
 import uuid
-import glob
 import asyncio
 import shutil
 from pathlib import Path
 from typing import List, Tuple
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, InputMediaDocument
+from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
@@ -151,11 +150,7 @@ def clear_session(user_id: int):
     if user_dir.exists():
         shutil.rmtree(user_dir, ignore_errors=True)
 
-def kb_upload():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Selesai unggah ✅", callback_data="done_upload")],
-        [InlineKeyboardButton(text="Batalkan ❌", callback_data="cancel_all")],
-    ])
+# ========= Commands =========
 
 @dp.message(Command("start"))
 async def start_cmd(msg: Message, state: FSMContext):
@@ -164,8 +159,8 @@ async def start_cmd(msg: Message, state: FSMContext):
     await state.set_state(UploadStates.collecting)
     await msg.answer(
         "Halo! Kirimkan satu atau beberapa file .txt (satu nomor per baris).\n"
-        "Jika sudah selesai unggah, tekan tombol di bawah.",
-        reply_markup=kb_upload()
+        "Jika sudah selesai unggah, ketik /done untuk memulai proses.\n"
+        "Ketik /cancel untuk membatalkan."
     )
 
 @dp.message(UploadStates.collecting, F.document)
@@ -179,26 +174,35 @@ async def handle_document(msg: Message, state: FSMContext):
     file = await bot.get_file(doc.file_id)
     await bot.download_file(file.file_path, destination=dest)
     count = len(list(in_dir.glob("*.txt")))
-    await msg.reply(f"✅ Tersimpan: {doc.file_name}\nTotal file: {count}", reply_markup=kb_upload())
+    await msg.reply(f"✅ Tersimpan: {doc.file_name}\nTotal file: {count}")
 
-@dp.callback_query(UploadStates.collecting, F.data == "done_upload")
-async def done_upload(cb: CallbackQuery, state: FSMContext):
-    in_dir, _ = session_paths(cb.from_user.id)
+@dp.message(Command("done"), UploadStates.collecting)
+async def done_upload_cmd(msg: Message, state: FSMContext):
+    in_dir, _ = session_paths(msg.from_user.id)
     files = list(in_dir.glob("*.txt"))
     if not files:
-        await cb.message.edit_text("Belum ada file .txt yang diunggah. Unggah dulu ya.", reply_markup=kb_upload())
-        await cb.answer()
+        await msg.reply("Belum ada file .txt yang diunggah. Unggah dulu baru ketik /done.")
         return
     await state.set_state(UploadStates.ask_contact)
-    await cb.message.edit_text("Masukkan Nama Kontak Dasar (mis. Kontak, Andika, dsb):")
-    await cb.answer()
+    await msg.answer("Masukkan Nama Kontak Dasar:")
 
-@dp.callback_query(UploadStates.collecting, F.data == "cancel_all")
-async def cancel_all(cb: CallbackQuery, state: FSMContext):
-    clear_session(cb.from_user.id)
+@dp.message(Command("cancel"))
+async def cancel_cmd(msg: Message, state: FSMContext):
+    clear_session(msg.from_user.id)
     await state.clear()
-    await cb.message.edit_text("Dibatalkan. Ketik /start untuk memulai lagi.")
-    await cb.answer()
+    await msg.answer("Dibatalkan. Ketik /start untuk memulai lagi.")
+
+@dp.message(Command("clearcache"))
+async def clear_cache_cmd(msg: Message):
+    removed_count = 0
+    for user_folder in SESSIONS_DIR.iterdir():
+        if user_folder.is_dir():
+            try:
+                shutil.rmtree(user_folder, ignore_errors=True)
+                removed_count += 1
+            except Exception:
+                pass
+    await msg.answer(f"🗑 Cache dibersihkan. {removed_count} folder dihapus.")
 
 @dp.message(UploadStates.ask_contact)
 async def ask_outbase(msg: Message, state: FSMContext):
@@ -208,7 +212,7 @@ async def ask_outbase(msg: Message, state: FSMContext):
         return
     await state.update_data(contact_name=contact)
     await state.set_state(UploadStates.ask_outbase)
-    await msg.reply("Masukkan Nama File Output Dasar (mis. Kontak, Teman, dsb):")
+    await msg.reply("Masukkan Nama File Output Dasar:")
 
 @dp.message(UploadStates.ask_outbase)
 async def ask_perfile(msg: Message, state: FSMContext):
@@ -218,7 +222,7 @@ async def ask_perfile(msg: Message, state: FSMContext):
         return
     await state.update_data(base_file=outbase)
     await state.set_state(UploadStates.ask_perfile)
-    await msg.reply("Berapa kontak maksimal per file .vcf? (angka, mis. 500)")
+    await msg.reply("Berapa kontak maksimal per file .vcf? (angka)")
 
 @dp.message(UploadStates.ask_perfile)
 async def process_inputs(msg: Message, state: FSMContext):
@@ -268,14 +272,9 @@ async def process_inputs(msg: Message, state: FSMContext):
         )
         await status.edit_text(summary)
 
-        # Kirim semua file secara bersamaan (maks 10 per batch)
-        batch_size = 10
-        for i in range(0, len(vcf_files), batch_size):
-            media = [
-                InputMediaDocument(media=InputFile(fp), caption=fp.name)
-                for fp in vcf_files[i:i+batch_size]
-            ]
-            await msg.answer_media_group(media)
+        for fp in vcf_files:
+            with open(fp, "rb") as f:
+                await msg.answer_document(document=f, caption=fp.name)
 
     except Exception as e:
         await status.edit_text(f"❌ Terjadi error: {e}")
@@ -283,6 +282,7 @@ async def process_inputs(msg: Message, state: FSMContext):
         clear_session(msg.from_user.id)
         await state.clear()
 
+# ========= Main =========
 async def main():
     if not BOT_TOKEN:
         raise RuntimeError("Set BOT_TOKEN environment variable.")
